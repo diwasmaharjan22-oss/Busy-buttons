@@ -1,4 +1,4 @@
-var CACHE = 'busy-buttons-v2';
+var CACHE = 'busy-buttons-v3';
 var FILES = ['./', 'index.html', 'icon-180.png', 'icon-512.png', 'manifest.webmanifest'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
