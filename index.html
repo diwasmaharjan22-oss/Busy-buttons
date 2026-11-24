@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -38,7 +38,7 @@ img { max-width: 100%; }
   color-scheme: light;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; touch-action: none; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -528,10 +528,38 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
   });
 
   /* stop the page reacting to toddler gestures */
-  ['contextmenu', 'gesturestart', 'gesturechange', 'dblclick', 'selectstart'].forEach(function (t) {
-    app.addEventListener(t, function (e) { e.preventDefault(); });
+  function inSheet(el) { return !sheet.hidden && el && el.closest && !!el.closest('.sheet'); }
+  function stop(e) { if (e.cancelable) e.preventDefault(); }
+  ['contextmenu', 'selectstart'].forEach(function (t) { app.addEventListener(t, stop); });
+  /* pinch, double-tap and triple-tap zoom: refused everywhere */
+  ['gesturestart', 'gesturechange', 'gestureend', 'dblclick'].forEach(function (t) {
+    document.addEventListener(t, stop, { passive: false });
   });
-  app.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  /* on the play screen every touch is ours alone, so the browser never zooms or scrolls;
+     in the grown-ups panel one finger may still scroll and tap, two fingers do nothing */
+  ['touchstart', 'touchmove'].forEach(function (t) {
+    document.addEventListener(t, function (e) {
+      if (e.touches.length > 1 || !inSheet(e.target)) stop(e);
+    }, { passive: false });
+  });
+  var lastEnd = 0;
+  document.addEventListener('touchend', function (e) {
+    if (!inSheet(e.target) || e.timeStamp - lastEnd < 350) stop(e);
+    lastEnd = e.timeStamp;
+    unlock();
+  }, { passive: false });
+  document.addEventListener('pointerup', function () { unlock(); });
+  /* if the page is ever zoomed anyway, ask the browser to snap back to normal size */
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () {
+      if (window.visualViewport.scale <= 1.01) return;
+      var m = document.querySelector('meta[name="viewport"]');
+      if (!m) return;
+      var c = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+      m.setAttribute('content', c + ', shrink-to-fit=no');
+      setTimeout(function () { m.setAttribute('content', c); }, 60);
+    });
+  }
 
   /* ---------- sound ---------- */
   var ac = null;
@@ -550,28 +578,55 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
     } catch (e) {}
   }
   /* the phone's own voice reads the name and its sound; a new press cuts the last one short */
-  function say(text) {
-    if (!S.voice) return;
+  var primed = false, pendingSay = '';
+  function speak(text, silent) {
     try {
       var ss = window.speechSynthesis;
       if (!ss || !window.SpeechSynthesisUtterance) return;
       ss.cancel();
       var u = new SpeechSynthesisUtterance(text);
       u.lang = 'en-US'; u.rate = 0.9; u.pitch = 1.25;
+      if (silent) u.volume = 0;
       ss.speak(u);
     } catch (e) {}
   }
+  function say(text) {
+    if (!S.voice) return;
+    if (!primed) { pendingSay = text; return; } /* phones only let a voice start as a finger lifts */
+    speak(text);
+  }
+  /* runs as a finger lifts: the moment phones allow sound and voice to be switched on */
+  function unlock() {
+    try {
+      if (S.sound) {
+        if (!ac) { var C = window.AudioContext || window.webkitAudioContext; if (C) ac = new C(); }
+        if (ac && ac.state === 'suspended') ac.resume();
+      }
+    } catch (e) {}
+    wake();
+    if (!primed) {
+      primed = true;
+      if (pendingSay && S.voice) speak(pendingSay); else speak(' ', true);
+      pendingSay = '';
+    }
+  }
   var woke = false;
   function wake() {
-    if (woke) return; woke = true;
-    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (e) {}
+    if (woke) return;
+    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function () { woke = true; }).catch(function () {}); } catch (e) {}
   }
 
   /* ---------- sparkles ---------- */
   var cv = $('fx'), ctx = cv.getContext('2d'), parts = [], raf = 0;
+  var W = 0, H = 0;
   function sizeCanvas() {
-    var d = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = Math.round(innerWidth * d); cv.height = Math.round(innerHeight * d);
+    /* the full page size, not the visible part: the visible part shrinks if the page is ever zoomed,
+       and sparkles outside it would never be wiped and would pile up into a smear */
+    var d = Math.min(window.devicePixelRatio || 1, 2), root = document.documentElement;
+    var w = Math.max(root.clientWidth, 1), h = Math.max(root.clientHeight, 1);
+    if (w === W && h === H) return;
+    W = w; H = h;
+    cv.width = Math.round(W * d); cv.height = Math.round(H * d);
     ctx.setTransform(d, 0, 0, d, 0, 0);
   }
   window.addEventListener('resize', sizeCanvas); sizeCanvas();
@@ -587,7 +642,7 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
     if (!raf) raf = requestAnimationFrame(tick);
   }
   function tick() {
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.restore();
     parts = parts.filter(function (p) { return p.life > 0; });
     parts.forEach(function (p) {
       p.vy += 0.35; p.x += p.vx; p.y += p.vy; p.life -= 0.022; p.rot += 0.12;
