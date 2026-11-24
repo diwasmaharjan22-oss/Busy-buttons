@@ -256,7 +256,7 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
       <h2>Sound</h2>
       <button class="toggle" type="button" role="switch" id="sound" data-key="sound" style="margin-top:0">Button sounds <b></b></button>
       <button class="toggle" type="button" role="switch" id="voice" data-key="voice">Say names and sounds out loud <b></b></button>
-      <p style="margin-top:10px">A voice says what is on screen, like "Dog. Woof woof!"</p>
+      <p style="margin-top:10px">A gentle recorded voice says what is on screen, like "Dog. Woof woof!"</p>
       <p style="margin-top:10px">No sound? Check the silent switch on the side of the iPhone.</p>
     </section>
 
@@ -428,6 +428,7 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
       setKey(b, it, ((i + 2 * Math.floor(i / 3)) % 6) + 1);
       pad.appendChild(b);
     });
+    preloadPad();
   }
   function refreshKey(b) {
     if (S.mode === 'shapes') {
@@ -444,6 +445,7 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
       var spare = picPool().filter(function (p) { return onPad.indexOf(p.v) < 0; });
       if (spare.length) setKey(b, spare[Math.floor(Math.random() * spare.length)], b._c);
     }
+    preloadPad();
   }
 
   /* ---------- stage ---------- */
@@ -479,8 +481,8 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
     showOnDisc(animal
       ? '<span class="emo" role="img" aria-label="' + animal[1] + '">' + animal[0] + '</span><span class="badge">' + b._item.v + '</span>'
       : itemHTML(b._item), b._c);
-    if (animal) say(b._item.v + '. ' + animal[1] + '.');
-    else if (b._item.say) say(b._item.say);
+    if (animal) sayClip('letter-' + b._item.v.toLowerCase(), b._item.v + ' is for ' + animal[1] + '.');
+    else if (b._item.say) sayClip(slug(b._item.label), b._item.say);
     burst(x, y, 12);
     taps++;
     var n = taps % 6;
@@ -595,10 +597,48 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
     if (!primed) { pendingSay = text; return; } /* phones only let a voice start as a finger lifts */
     speak(text);
   }
+  /* recorded voice clips (voice/<name>.mp3), played through the same sound engine as the notes.
+     If a clip is missing or will not load, the phone's own voice says the line instead. */
+  var clipLoads = {}, clipSrc = null, sayToken = 0;
+  function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
+  function loadClip(key) {
+    if (clipLoads[key]) return clipLoads[key];
+    clipLoads[key] = new Promise(function (resolve, reject) {
+      if (!window.fetch) return reject();
+      if (!ac) { var C = window.AudioContext || window.webkitAudioContext; if (!C) return reject(); ac = new C(); }
+      fetch('voice/' + key + '.mp3').then(function (r) {
+        if (!r.ok) throw new Error('missing');
+        return r.arrayBuffer();
+      }).then(function (data) { ac.decodeAudioData(data, resolve, reject); }).catch(reject);
+    });
+    clipLoads[key].catch(function () {});
+    return clipLoads[key];
+  }
+  function stopClip() { try { if (clipSrc) clipSrc.stop(); } catch (e) {} clipSrc = null; }
+  function sayClip(key, text) {
+    if (!S.voice) return;
+    var token = ++sayToken;
+    loadClip(key).then(function (buffer) {
+      if (token !== sayToken) return; /* a newer press has taken over */
+      stopClip();
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+      if (ac.state === 'suspended') ac.resume();
+      var s = ac.createBufferSource(); s.buffer = buffer; s.connect(ac.destination); s.start();
+      clipSrc = s;
+    }, function () { if (token === sayToken) { stopClip(); say(text); } });
+  }
+  function preloadPad() {
+    if (!S.voice) return;
+    Array.prototype.forEach.call(pad.children, function (k) {
+      var it = k._item;
+      if (it.kind === 'pic') loadClip(slug(it.label));
+      else if (S.mode === 'letters' && S.animals && ANIMALS[it.v]) loadClip('letter-' + it.v.toLowerCase());
+    });
+  }
   /* runs as a finger lifts: the moment phones allow sound and voice to be switched on */
   function unlock() {
     try {
-      if (S.sound) {
+      if (S.sound || S.voice) {
         if (!ac) { var C = window.AudioContext || window.webkitAudioContext; if (C) ac = new C(); }
         if (ac && ac.state === 'suspended') ac.resume();
       }
@@ -717,7 +757,7 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
     t.addEventListener('click', function () {
       var k = t.dataset.key; S[k] = !S[k]; renderSheet(); save();
       if (k === 'sound' && S.sound) tone(659.25, 0, 0.2);
-      if (k === 'voice' && S.voice) say('Dog. Woof woof!');
+      if (k === 'voice' && S.voice) sayClip('dog', 'Dog. Woof woof!');
     });
   });
   function renderSheet() {
