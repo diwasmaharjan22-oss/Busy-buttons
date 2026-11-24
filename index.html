@@ -109,6 +109,14 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
   transition: background .2s;
 }
 .disc svg { width: 62%; height: 62%; }
+.disc { position: relative; }
+.disc .emo { font-size: calc(var(--d) * .56); line-height: 1; }
+.disc .badge {
+  position: absolute; right: 0; bottom: 0; width: 34%; height: 34%; border-radius: 50%;
+  background: var(--key-ink); color: var(--c);
+  display: grid; place-items: center; font-size: calc(var(--d) * .22); line-height: 1;
+  box-shadow: 0 0 0 5px var(--bg);
+}
 .disc.pop { animation: pop .38s cubic-bezier(.3,1.6,.5,1); }
 .disc.spin { animation: spin .9s cubic-bezier(.3,1.3,.5,1); }
 
@@ -223,6 +231,7 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
         <button class="choice" type="button" id="mode-letters" data-mode="letters">Letters</button>
       </div>
       <button class="toggle" type="button" role="switch" id="autoMode" data-key="autoMode">Switch between them by itself <b></b></button>
+      <button class="toggle" type="button" role="switch" id="animals" data-key="animals">Show an animal for each letter <b></b></button>
     </section>
 
     <section>
@@ -273,16 +282,23 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
   ];
   var MODE_ORDER = ['phone', 'shapes', 'letters'];
   var SHAPES = ['circle', 'star', 'heart', 'triangle', 'square', 'moon', 'diamond', 'flower', 'drop', 'plus', 'egg', 'hexagon'];
+  var ANIMALS = {
+    A: ['🐊', 'Alligator'], B: ['🐻', 'Bear'], C: ['🐱', 'Cat'], D: ['🐶', 'Dog'], E: ['🐘', 'Elephant'],
+    F: ['🦊', 'Fox'], G: ['🦒', 'Giraffe'], H: ['🐴', 'Horse'], I: ['🦎', 'Iguana'], J: ['🐆', 'Jaguar'],
+    K: ['🐨', 'Koala'], L: ['🦁', 'Lion'], M: ['🐵', 'Monkey'], N: ['🐦', 'Nightingale'], O: ['🐙', 'Octopus'],
+    P: ['🐧', 'Penguin'], Q: ['🦆', 'Quacking duck'], R: ['🐰', 'Rabbit'], S: ['🐍', 'Snake'], T: ['🐯', 'Tiger'],
+    U: ['🦄', 'Unicorn'], V: ['🦅', 'Vulture'], W: ['🐳', 'Whale'], X: ['🐟', 'X-ray fish'], Y: ['🐂', 'Yak'], Z: ['🦓', 'Zebra']
+  };
   var NOTES = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66];
 
   /* ---------- settings (remembered on this phone only) ---------- */
-  var S = { mode: 'phone', palette: 0, autoMode: true, autoColor: true, sound: true };
+  var S = { mode: 'phone', palette: 0, autoMode: true, autoColor: true, sound: true, animals: true };
   try {
     var saved = JSON.parse(localStorage.getItem('busy-buttons') || 'null');
     if (saved && typeof saved === 'object') {
       if (MODE_ORDER.indexOf(saved.mode) >= 0) S.mode = saved.mode;
       if (saved.palette >= 0 && saved.palette < PALETTES.length) S.palette = saved.palette | 0;
-      ['autoMode', 'autoColor', 'sound'].forEach(function (k) { if (typeof saved[k] === 'boolean') S[k] = saved[k]; });
+      ['autoMode', 'autoColor', 'sound', 'animals'].forEach(function (k) { if (typeof saved[k] === 'boolean') S[k] = saved[k]; });
     }
   } catch (e) {}
   function save() { try { localStorage.setItem('busy-buttons', JSON.stringify(S)); } catch (e) {} }
@@ -365,9 +381,9 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
       var free = SHAPES.filter(function (n) { return n !== b._item.v; });
       var fresh = free.filter(function (n) { return shown.indexOf(n) < 0; });
       var pick = (fresh.length ? fresh : free)[Math.floor(Math.random() * (fresh.length ? fresh.length : free.length))];
-      setKey(b, sh(pick), (b._c % 6) + 1);
+      setKey(b, sh(pick), b._c); /* a button keeps its own colour, so neighbours never end up matching */
     } else if (S.mode === 'letters') {
-      setKey(b, ch(String.fromCharCode(65 + nextLetter % 26)), (b._c % 6) + 1);
+      setKey(b, ch(String.fromCharCode(65 + nextLetter % 26)), b._c);
       nextLetter++;
     }
   }
@@ -379,18 +395,18 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
     disc.style.setProperty('--c', 'var(--k' + colorN + ')');
     replay(disc, cls || 'pop');
   }
-  var taps = 0, rounds = 0;
+  var taps = 0, rounds = 0, partying = false;
   function setDots(n) {
     Array.prototype.forEach.call(dots.children, function (d, i) { d.classList.toggle('on', i < n); });
   }
   function celebrate() {
-    rounds++;
+    rounds++; partying = true;
     dots.classList.add('party');
     [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) { tone(f, i * 0.09, 0.3); });
     var r = disc.getBoundingClientRect();
     burst(r.left + r.width / 2, r.top + r.height / 2, 40);
     setTimeout(function () {
-      dots.classList.remove('party'); setDots(0);
+      dots.classList.remove('party'); partying = false; setDots(taps % 6);
       var changed = false;
       if (S.autoColor && rounds % 3 === 0) { S.palette = (S.palette + 1) % PALETTES.length; applyPalette(); changed = true; }
       if (S.autoMode && rounds % 5 === 0) { S.mode = MODE_ORDER[(MODE_ORDER.indexOf(S.mode) + 1) % 3]; buildPad(); changed = true; }
@@ -401,37 +417,54 @@ button:focus-visible { outline: 4px solid var(--ink); outline-offset: 3px; }
   function press(b, x, y) {
     if (!sheet.hidden) return;
     tone(NOTES[b._i % NOTES.length], 0, 0.22);
-    showOnDisc(itemHTML(b._item), b._c);
+    var animal = S.mode === 'letters' && S.animals ? ANIMALS[b._item.v] : null;
+    showOnDisc(animal
+      ? '<span class="emo" role="img" aria-label="' + animal[1] + '">' + animal[0] + '</span><span class="badge">' + b._item.v + '</span>'
+      : itemHTML(b._item), b._c);
     burst(x, y, 12);
     taps++;
     var n = taps % 6;
-    setDots(n === 0 ? 6 : n);
-    if (n === 0) celebrate();
+    if (!partying) {
+      setDots(n === 0 ? 6 : n);
+      if (n === 0) celebrate();
+    }
     if (S.mode !== 'phone') setTimeout(function () { if (b.isConnected) refreshKey(b); }, 170);
   }
 
-  pad.addEventListener('pointerdown', function (e) {
-    var b = e.target.closest ? e.target.closest('.key') : null;
-    if (!b) return;
+  /* fingers: each finger is followed as it slides, so scribbling plays every button it crosses */
+  var fingers = {}, lastTrail = 0;
+  function keyAt(x, y) { var el = document.elementFromPoint(x, y); return el && el.closest ? el.closest('.key') : null; }
+  app.addEventListener('pointerdown', function (e) {
+    if (e.target.closest && e.target.closest('.parents')) return;
     e.preventDefault();
     wake();
-    b.classList.add('down');
-    press(b, e.clientX, e.clientY);
+    try { e.target.releasePointerCapture(e.pointerId); } catch (err) {}
+    var b = keyAt(e.clientX, e.clientY);
+    fingers[e.pointerId] = b;
+    if (b) { b.classList.add('down'); press(b, e.clientX, e.clientY); }
+    else { tone(NOTES[Math.floor(Math.random() * 6)], 0, 0.15, 0.1); burst(e.clientX, e.clientY, 8); }
   });
-  ['pointerup', 'pointercancel', 'pointerout'].forEach(function (t) {
-    pad.addEventListener(t, function (e) {
-      var b = e.target.closest ? e.target.closest('.key') : null;
-      if (b) b.classList.remove('down');
-    });
+  app.addEventListener('pointermove', function (e) {
+    if (!(e.pointerId in fingers) || !sheet.hidden) return;
+    var b = keyAt(e.clientX, e.clientY), prev = fingers[e.pointerId];
+    if (b === prev) {
+      if (!b && e.timeStamp - lastTrail > 70) { lastTrail = e.timeStamp; burst(e.clientX, e.clientY, 2); }
+      return;
+    }
+    if (prev) prev.classList.remove('down');
+    fingers[e.pointerId] = b;
+    if (b) { b.classList.add('down'); press(b, e.clientX, e.clientY); }
   });
+  function lift(e) {
+    var prev = fingers[e.pointerId];
+    if (prev) prev.classList.remove('down');
+    delete fingers[e.pointerId];
+  }
+  window.addEventListener('pointerup', lift);
+  window.addEventListener('pointercancel', lift);
   pad.addEventListener('click', function (e) { /* keyboard users */
     var b = e.target.closest ? e.target.closest('.key') : null;
     if (b && e.detail === 0) { var r = b.getBoundingClientRect(); press(b, r.left + r.width / 2, r.top + r.height / 2); }
-  });
-  stage.addEventListener('pointerdown', function (e) {
-    wake();
-    tone(NOTES[Math.floor(Math.random() * 6)], 0, 0.15, 0.1);
-    burst(e.clientX, e.clientY, 8);
   });
 
   /* stop the page reacting to toddler gestures */
